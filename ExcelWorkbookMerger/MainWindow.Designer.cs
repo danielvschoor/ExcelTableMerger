@@ -220,6 +220,7 @@ namespace ExcelWorkbookMerger
             this.Controls.Add(this.fileBrowseButton);
             this.Location = new System.Drawing.Point(15, 15);
             this.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
+            this.MinimumSize = this.Size;
             this.Name = "MainWindow";
             this.ResumeLayout(false);
             this.PerformLayout();
