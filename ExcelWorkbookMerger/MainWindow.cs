@@ -163,5 +163,5 @@ public partial class MainWindow : Form
             // Cancel the asynchronous operation.
             backgroundWorker1.CancelAsync();
     }
-    
+
 }
