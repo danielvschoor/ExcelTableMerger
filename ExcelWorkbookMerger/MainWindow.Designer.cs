@@ -116,7 +116,7 @@ namespace ExcelWorkbookMerger
             // label1
             // 
             this.label1.Anchor = System.Windows.Forms.AnchorStyles.Left;
-            this.label1.Location = new System.Drawing.Point(14, -12);
+            this.label1.Location = new System.Drawing.Point(13, 50);
             this.label1.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             this.label1.Name = "label1";
             this.label1.Size = new System.Drawing.Size(117, 27);
@@ -220,7 +220,7 @@ namespace ExcelWorkbookMerger
             this.Controls.Add(this.fileBrowseButton);
             this.Location = new System.Drawing.Point(15, 15);
             this.Margin = new System.Windows.Forms.Padding(4, 3, 4, 3);
-            this.MinimumSize = this.Size;
+            this.MinimumSize = new System.Drawing.Size(380, 680);
             this.Name = "MainWindow";
             this.ResumeLayout(false);
             this.PerformLayout();
