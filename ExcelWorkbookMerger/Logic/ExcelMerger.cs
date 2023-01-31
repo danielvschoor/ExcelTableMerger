@@ -80,16 +80,15 @@ public static partial class ExcelMerger
     private static void ProcessDataTables(IEnumerable<string> files, BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
 
-        //Parallel.ForEach(files, (file, state) =>
-        foreach (var file in files)
+        Parallel.ForEach(files, (file, state) =>
         {
             try
             {
-                //if (ShouldCancel(worker, workArgs)|| state.IsStopped)
-                //{
-                //    state.Stop();
-                //    return;
-                //}
+                if (ShouldCancel(worker, workArgs)|| state.IsStopped)
+                {
+                    state.Stop();
+                    return;
+                }
 
                 var excelPackage = new ExcelPackage(new FileInfo(file));
 
@@ -104,11 +103,11 @@ public static partial class ExcelMerger
                     }
                     foreach (var excelTableName in TablesToExport.Keys)
                     {
-                        //if (ShouldCancel(worker, workArgs) || state.IsStopped)
-                        //{
-                        //    state.Stop();
-                        //    return;
-                        //}
+                        if (ShouldCancel(worker, workArgs) || state.IsStopped)
+                        {
+                            state.Stop();
+                            return;
+                        }
 
                         var table = sheet.Tables.FirstOrDefault(x => x.Name == excelTableName);
                         if (table == null) continue;
@@ -134,9 +133,8 @@ public static partial class ExcelMerger
             catch (Exception exception)
             {
                 Exceptions.Enqueue(exception);
-            }
-        }
-        //});
+            }        
+        });
     }
 
     private static FileInfo? CheckResultsFile(string path)
