@@ -1,5 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.4.33103.184
+MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ExcelWorkbookMerger", "ExcelWorkbookMerger\ExcelWorkbookMerger.csproj", "{47553983-F184-428E-8565-0711452E346C}"
 EndProject
 Global
@@ -12,5 +15,11 @@ Global
 		{47553983-F184-428E-8565-0711452E346C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{47553983-F184-428E-8565-0711452E346C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{47553983-F184-428E-8565-0711452E346C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {757F7493-C8C7-485D-BAFE-4F1C553E64D9}
 	EndGlobalSection
 EndGlobal
