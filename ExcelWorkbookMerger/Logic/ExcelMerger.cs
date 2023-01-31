@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Data;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using OfficeOpenXml;
@@ -12,11 +13,11 @@ using OfficeOpenXml.Export.ToDataTable;
 
 namespace ExcelWorkbookMerger.Logic;
 
-public static class ExcelMerger
+public static partial class ExcelMerger
 {
     private const int StepSize = 1;
     private const string FileName = @"MergedExcel.xlsx";
-    private static readonly ConcurrentDictionary<string, byte> TablesToExport = new();
+    private static readonly ConcurrentDictionary<string, string> TablesToExport = new();
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<DataTable>> DataTables = new();
     private static readonly ConcurrentQueue<Exception> Exceptions = new();
     private static ExcelPackage? _mergedWorkbook;
@@ -51,24 +52,24 @@ public static class ExcelMerger
 
     private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
-        foreach (var excelTableName in TablesToExport.Keys)
+        foreach (KeyValuePair<string, string> excelTable in TablesToExport)
         {
             if (ShouldCancel(worker, workArgs)) return false;
 
             var finalDt = new DataTable();
-            foreach (var tempDt in DataTables[excelTableName])
+            foreach (var tempDt in DataTables[excelTable.Key])
             {
                 if (ShouldCancel(worker, workArgs)) return false;
 
                 finalDt.Merge(tempDt);
             }
 
-            var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == excelTableName) ??
-                                 _mergedWorkbook?.Workbook.Worksheets.Add(excelTableName);
+            var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == excelTable.Value) ??
+                                 _mergedWorkbook?.Workbook.Worksheets.Add(excelTable.Value);
             if (finalWorksheet == null) return false;
-            if (finalWorksheet.Tables.All(x => x.Name != excelTableName))
+            if (finalWorksheet.Tables.All(x => x.Name != excelTable.Value))
                 finalWorksheet.Tables.Add(new ExcelAddressBase(1, 1, finalDt.Rows.Count + 1,
-                    finalDt.Columns.Count), excelTableName);
+                    finalDt.Columns.Count), excelTable.Value);
 
             finalWorksheet.Cells["A1"].LoadFromDataTable(finalDt, true);
         }
@@ -78,30 +79,36 @@ public static class ExcelMerger
 
     private static void ProcessDataTables(IEnumerable<string> files, BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
-        
-        Parallel.ForEach(files, (file, state) =>
+
+        //Parallel.ForEach(files, (file, state) =>
+        foreach (var file in files)
         {
             try
             {
-                if (ShouldCancel(worker, workArgs)|| state.IsStopped)
-                {
-                    state.Stop();
-                    return;
-                }
+                //if (ShouldCancel(worker, workArgs)|| state.IsStopped)
+                //{
+                //    state.Stop();
+                //    return;
+                //}
 
                 var excelPackage = new ExcelPackage(new FileInfo(file));
 
                 foreach (var sheet in excelPackage.Workbook.Worksheets)
                 {
                     foreach (var tableName in sheet.Tables.Select(x => x.Name))
-                        TablesToExport.TryAdd(tableName, byte.MinValue);
+                    {
+                        var newTableName = tableName.Split('_')[0];
+                        newTableName = DigitRegex().Replace(newTableName, string.Empty);
+                        newTableName = newTableName +'_' + sheet.Name;
+                        TablesToExport.TryAdd(tableName, newTableName);
+                    }
                     foreach (var excelTableName in TablesToExport.Keys)
                     {
-                        if (ShouldCancel(worker, workArgs) || state.IsStopped)
-                        {
-                            state.Stop();
-                            return;
-                        }
+                        //if (ShouldCancel(worker, workArgs) || state.IsStopped)
+                        //{
+                        //    state.Stop();
+                        //    return;
+                        //}
 
                         var table = sheet.Tables.FirstOrDefault(x => x.Name == excelTableName);
                         if (table == null) continue;
@@ -128,7 +135,8 @@ public static class ExcelMerger
             {
                 Exceptions.Enqueue(exception);
             }
-        });
+        }
+        //});
     }
 
     private static FileInfo? CheckResultsFile(string path)
@@ -160,4 +168,7 @@ public static class ExcelMerger
         workArgs.Cancel = true;
         return true;
     }
+
+    [GeneratedRegex("[\\d-]")]
+    private static partial Regex DigitRegex();
 }
