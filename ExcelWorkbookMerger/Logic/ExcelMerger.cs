@@ -6,10 +6,13 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using ExcelWorkbookMerger.Models;
 using OfficeOpenXml;
 using OfficeOpenXml.Export.ToDataTable;
+using static OfficeOpenXml.ExcelErrorValue;
 
 namespace ExcelWorkbookMerger.Logic;
 
@@ -17,7 +20,7 @@ public static partial class ExcelMerger
 {
     private const int StepSize = 1;
     private const string FileName = @"MergedExcel.xlsx";
-    private static readonly ConcurrentDictionary<string, string> TablesToExport = new();
+    private static readonly ConcurrentDictionary<string, TableExport> TablesToExport = new();
     private static readonly ConcurrentDictionary<string, ConcurrentQueue<DataTable>> DataTables = new();
     private static readonly ConcurrentQueue<Exception> Exceptions = new();
     private static ExcelPackage? _mergedWorkbook;
@@ -52,26 +55,32 @@ public static partial class ExcelMerger
 
     private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
-        foreach (KeyValuePair<string, string> excelTable in TablesToExport)
+        foreach (KeyValuePair<string, TableExport> excelTable in TablesToExport)
         {
-            if (ShouldCancel(worker, workArgs)) return false;
-
-            var finalDt = new DataTable();
-            foreach (var tempDt in DataTables[excelTable.Key])
+            try
             {
                 if (ShouldCancel(worker, workArgs)) return false;
 
-                finalDt.Merge(tempDt);
+                var finalDt = new DataTable();
+                foreach (var tempDt in DataTables[excelTable.Key])
+                {
+                    if (ShouldCancel(worker, workArgs)) return false;
+
+                    finalDt.Merge(tempDt);
+                }
+
+                var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == excelTable.Value.NewTableName) ??
+                                     _mergedWorkbook?.Workbook.Worksheets.Add(excelTable.Value.NewTableName);
+                if (finalWorksheet == null) return false;
+                if (finalWorksheet.Tables.All(x => x.Name != excelTable.Value.NewTableName))
+                    finalWorksheet.Tables.Add(new ExcelAddressBase(1, 1, finalDt.Rows.Count + 1,
+                        finalDt.Columns.Count), excelTable.Value.NewTableName);
+
+                finalWorksheet.Cells["A1"].LoadFromDataTable(finalDt, true);
+            }catch (Exception ex)
+            {
+                throw new Exception($"Exception occurred while exporting workbook.\nException originated from file:\n{excelTable.Value.FileName}.\n\nException: {ex}");
             }
-
-            var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == excelTable.Value) ??
-                                 _mergedWorkbook?.Workbook.Worksheets.Add(excelTable.Value);
-            if (finalWorksheet == null) return false;
-            if (finalWorksheet.Tables.All(x => x.Name != excelTable.Value))
-                finalWorksheet.Tables.Add(new ExcelAddressBase(1, 1, finalDt.Rows.Count + 1,
-                    finalDt.Columns.Count), excelTable.Value);
-
-            finalWorksheet.Cells["A1"].LoadFromDataTable(finalDt, true);
         }
 
         return !ShouldCancel(worker, workArgs);
@@ -96,10 +105,16 @@ public static partial class ExcelMerger
                 {
                     foreach (var tableName in sheet.Tables.Select(x => x.Name))
                     {
-                        var newTableName = tableName.Split('_')[0];
-                        newTableName = DigitRegex().Replace(newTableName, string.Empty);
-                        newTableName = newTableName +'_' + sheet.Name;
-                        TablesToExport.TryAdd(tableName, newTableName);
+                        try
+                        {
+                            var newTableName = tableName.Split('_')[0];
+                            newTableName = DigitRegex().Replace(newTableName, string.Empty);
+                            newTableName = newTableName + '_' + sheet.Name;
+                            TablesToExport.TryAdd(tableName, new() { FileName = file, NewTableName = newTableName });
+                        }catch(Exception ex)
+                        {
+                            throw new Exception($"Exception in File: {file}\nSheet:{sheet}\nTable: {tableName}:\n{ex}");
+                        }
                     }
                     foreach (var excelTableName in TablesToExport.Keys)
                     {
@@ -132,7 +147,8 @@ public static partial class ExcelMerger
             }
             catch (Exception exception)
             {
-                Exceptions.Enqueue(exception);
+                var newException = new Exception($"Exception occurred while processing file {file}: {exception}");
+                Exceptions.Enqueue(newException);
             }        
         });
     }
