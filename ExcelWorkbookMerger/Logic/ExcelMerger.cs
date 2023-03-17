@@ -6,13 +6,12 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using ExcelWorkbookMerger.ExtensionMethods;
 using ExcelWorkbookMerger.Models;
 using OfficeOpenXml;
 using OfficeOpenXml.Export.ToDataTable;
-using static OfficeOpenXml.ExcelErrorValue;
 
 namespace ExcelWorkbookMerger.Logic;
 
@@ -20,14 +19,12 @@ public static partial class ExcelMerger
 {
     private const int StepSize = 1;
     private const string FileName = @"MergedExcel.xlsx";
-    private static readonly ConcurrentDictionary<string, TableExport> TablesToExport = new();
-    private static readonly ConcurrentDictionary<string, ConcurrentQueue<DataTable>> DataTables = new();
+    private static readonly ConcurrentDictionary<TableExport, ConcurrentQueue<DataTable>> DataTables = new();
     private static readonly ConcurrentQueue<Exception> Exceptions = new();
     private static ExcelPackage? _mergedWorkbook;
 
     private static void ClearFields()
     {
-        TablesToExport.Clear();
         DataTables.Clear();
         Exceptions.Clear();
         _mergedWorkbook = null;
@@ -55,31 +52,32 @@ public static partial class ExcelMerger
 
     private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
-        foreach (KeyValuePair<string, TableExport> excelTable in TablesToExport)
+        foreach (var ((fileName,newTableName,originalTableName), dataTables) in DataTables)
         {
             try
             {
                 if (ShouldCancel(worker, workArgs)) return false;
 
                 var finalDt = new DataTable();
-                foreach (var tempDt in DataTables[excelTable.Key])
+                foreach (var tempDt in dataTables)
                 {
                     if (ShouldCancel(worker, workArgs)) return false;
 
                     finalDt.Merge(tempDt);
                 }
 
-                var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == excelTable.Value.NewTableName) ??
-                                     _mergedWorkbook?.Workbook.Worksheets.Add(excelTable.Value.NewTableName);
+                var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == newTableName.Truncate(31)) ??
+                                     _mergedWorkbook?.Workbook.Worksheets.Add(newTableName);
                 if (finalWorksheet == null) return false;
-                if (finalWorksheet.Tables.All(x => x.Name != excelTable.Value.NewTableName))
+                if (finalWorksheet.Tables.All(x => x.Name != newTableName))
                     finalWorksheet.Tables.Add(new ExcelAddressBase(1, 1, finalDt.Rows.Count + 1,
-                        finalDt.Columns.Count), excelTable.Value.NewTableName);
+                        finalDt.Columns.Count), newTableName);
 
                 finalWorksheet.Cells["A1"].LoadFromDataTable(finalDt, true);
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
-                throw new Exception($"Exception occurred while exporting workbook.\nException originated from file:\n{excelTable.Value.FileName}.\n\nException: {ex}");
+                throw new Exception($"Exception occurred while exporting workbook.\nException originated from file:\n{fileName}.\n\nException: {ex}");
             }
         }
 
@@ -88,58 +86,51 @@ public static partial class ExcelMerger
 
     private static void ProcessDataTables(IEnumerable<string> files, BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
-
         Parallel.ForEach(files, (file, state) =>
         {
             try
             {
-                if (ShouldCancel(worker, workArgs)|| state.IsStopped)
+                if (ShouldCancel(worker, workArgs) || state.IsStopped)
                 {
                     state.Stop();
                     return;
                 }
 
                 var excelPackage = new ExcelPackage(new FileInfo(file));
-
                 foreach (var sheet in excelPackage.Workbook.Worksheets)
                 {
-                    foreach (var tableName in sheet.Tables.Select(x => x.Name))
+                    foreach (var table in sheet.Tables)
                     {
                         try
                         {
-                            var newTableName = tableName.Split('_')[0];
+                            var newTableName = table.Name.Split('_')[0];
                             newTableName = DigitRegex().Replace(newTableName, string.Empty);
                             newTableName = newTableName + '_' + sheet.Name;
-                            TablesToExport.TryAdd(tableName, new() { FileName = file, NewTableName = newTableName });
-                        }catch(Exception ex)
-                        {
-                            throw new Exception($"Exception in File: {file}\nSheet:{sheet}\nTable: {tableName}:\n{ex}");
+
+                            var tempDt = new DataTable();
+                            tempDt.Columns.AddRange(table.Columns.Select(x => new DataColumn(x.Name)).ToArray());
+                            var tableRange = table.Range;
+                            sheet.Cells[tableRange.Start.Row, tableRange.Start.Column, tableRange.End.Row,
+                                tableRange.End.Column].ToDataTable(x =>
+                            {
+                                x.EmptyRowStrategy = EmptyRowsStrategy.Ignore;
+                                x.FirstRowIsColumnNames = true;
+                                x.ExcelErrorParsingStrategy = ExcelErrorParsingStrategy.HandleExcelErrorsAsBlankCells;
+                            }, tempDt);
+                            var dtList = DataTables.GetOrAdd(new TableExport
+                                {
+                                    FileName = file,
+                                    NewTableName = newTableName,
+                                    OriginalTableName = table.Name
+                                }
+                                , _ => new ConcurrentQueue<DataTable>());
+                            dtList.Enqueue(tempDt);
                         }
-                    }
-                    foreach (var excelTableName in TablesToExport.Keys)
-                    {
-                        if (ShouldCancel(worker, workArgs) || state.IsStopped)
+                        catch (Exception ex)
                         {
-                            state.Stop();
-                            return;
+                            throw new Exception(
+                                $"Exception in File: {file}\nSheet:{sheet}\nTable: {table.Name}:\n{ex}");
                         }
-
-                        var table = sheet.Tables.FirstOrDefault(x => x.Name == excelTableName);
-                        if (table == null) continue;
-
-
-                        var tempDt = new DataTable();
-                        tempDt.Columns.AddRange(table.Columns.Select(x => new DataColumn(x.Name)).ToArray());
-                        var tableRange = table.Range;
-                        sheet.Cells[tableRange.Start.Row, tableRange.Start.Column, tableRange.End.Row,
-                            tableRange.End.Column].ToDataTable(x =>
-                        {
-                            x.EmptyRowStrategy = EmptyRowsStrategy.Ignore;
-                            x.FirstRowIsColumnNames = true;
-                            x.ExcelErrorParsingStrategy = ExcelErrorParsingStrategy.HandleExcelErrorsAsBlankCells;
-                        }, tempDt);
-                        var dtList = DataTables.GetOrAdd(excelTableName, _ => new ConcurrentQueue<DataTable>());
-                        dtList.Enqueue(tempDt);
                     }
                 }
 
@@ -149,7 +140,7 @@ public static partial class ExcelMerger
             {
                 var newException = new Exception($"Exception occurred while processing file {file}: {exception}");
                 Exceptions.Enqueue(newException);
-            }        
+            }
         });
     }
 
