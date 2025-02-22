@@ -69,6 +69,7 @@ public partial class MainWindow : Form
         cancelButton.Show();
         progressBar1.Show();
         label5.Show();
+        clearFileListButton.Hide();
         if (!progressBar1.IsHandleCreated)
         {
             var _ = progressBar1.Handle;
@@ -171,6 +172,7 @@ public partial class MainWindow : Form
         directoryTextBox.Show();
         label1.Show();
         label2.Show();
+        clearFileListButton.Show();
     }
 
     private void timer1_Tick(object sender, EventArgs e)

@@ -10,7 +10,6 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using Windows.Foundation.Diagnostics;
 using ExcelWorkbookMerger.ExtensionMethods;
 using ExcelWorkbookMerger.Models;
 using OfficeOpenXml;
@@ -39,7 +38,7 @@ public static partial class ExcelMerger
         Columns = {"File", "Sheet", "LogLevel", "LogMessage"},
     };
 
-    private static void AddLogMessage(LoggingLevel loggingLevel, string message, string? file = null,
+    private static void AddLogMessage(LogLevel loggingLevel, string message, string? file = null,
         string? sheet = null)
     {
         if (!(MergeSettings?.EnableDebugSheet ?? false))
@@ -59,6 +58,7 @@ public static partial class ExcelMerger
         {
             return;
         }
+
         lock (Lock)
         {
             DebugSheetDataTable.Rows.Add(file, sheetsParsed, sheetsNotParsed, sheetsUsedForMerge);
@@ -139,15 +139,16 @@ public static partial class ExcelMerger
         {
             return !ShouldCancel(worker, workArgs);
         }
-        
+
         var debugWorksheet =
             _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugLogs") ??
             _mergedWorkbook?.Workbook.Worksheets.Add("DebugLogs");
-            
+
         if (debugWorksheet == null)
         {
             return !ShouldCancel(worker, workArgs);
         }
+
         debugWorksheet.Cells["A1"].LoadFromDataTable(DebugLogDataTable, true);
         debugWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugSheets") ??
                          _mergedWorkbook?.Workbook.Worksheets.Add("DebugSheets");
@@ -155,6 +156,7 @@ public static partial class ExcelMerger
         {
             return !ShouldCancel(worker, workArgs);
         }
+
         debugWorksheet.Cells["A1"].LoadFromDataTable(DebugSheetDataTable, true);
 
         return !ShouldCancel(worker, workArgs);
@@ -192,7 +194,7 @@ public static partial class ExcelMerger
                                 DateTimeStyles.None, out date))
                         {
                             sheetsNotParsed.Add(sheet.Name);
-                            AddLogMessage(LoggingLevel.Warning, "Could not parse sheet name", file, sheet.Name);
+                            AddLogMessage(LogLevel.Warning, "Could not parse sheet name", file, sheet.Name);
                             continue;
                         }
 
@@ -213,7 +215,7 @@ public static partial class ExcelMerger
                             $"Unable to find latest sheet for {file}. Sheets should be named as MMMyy (FEB24)");
                     }
 
-                    AddLogMessage(LoggingLevel.Information, "Found latest sheet", file, latestSheet.Name);
+                    AddLogMessage(LogLevel.Info, "Found latest sheet", file, latestSheet.Name);
 
                     sheetsToProcess = [excelPackage.Workbook.Worksheets.First(x => x.Name == latestSheet.Name)];
                 }

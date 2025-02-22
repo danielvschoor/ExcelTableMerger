@@ -8,7 +8,7 @@
         <Nullable>enable</Nullable>
 		<SignAssembly>false</SignAssembly>
 		<Version>1.1.0</Version>
-		<TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
+		<TargetFramework>net9.0-windows</TargetFramework>
         <!-- <OutputType>WinExe</OutputType>
         
         <AssemblyOriginatorKeyFile>Daniel van Schoor.snk</AssemblyOriginatorKeyFile>
@@ -58,7 +58,7 @@
         <PlatformTarget>x64</PlatformTarget>
     </PropertyGroup>
     <ItemGroup>
-        <PackageReference Include="EPPlus" Version="6.1.2" />
+        <PackageReference Include="EPPlus" Version="7.6.0" />
         <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
     </ItemGroup>
 </Project>
