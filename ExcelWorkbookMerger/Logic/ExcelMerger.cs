@@ -52,7 +52,7 @@ public static partial class ExcelMerger
 
     private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs)
     {
-        foreach (var ((fileName,newTableName,originalTableName), dataTables) in DataTables)
+        foreach (var ((fileName, newTableName, _), dataTables) in DataTables)
         {
             try
             {
@@ -66,8 +66,9 @@ public static partial class ExcelMerger
                     finalDt.Merge(tempDt);
                 }
 
-                var finalWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == newTableName.Truncate(31)) ??
-                                     _mergedWorkbook?.Workbook.Worksheets.Add(newTableName);
+                var finalWorksheet =
+                    _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == newTableName.Truncate(31)) ??
+                    _mergedWorkbook?.Workbook.Worksheets.Add(newTableName);
                 if (finalWorksheet == null) return false;
                 if (finalWorksheet.Tables.All(x => x.Name != newTableName))
                     finalWorksheet.Tables.Add(new ExcelAddressBase(1, 1, finalDt.Rows.Count + 1,
@@ -77,7 +78,8 @@ public static partial class ExcelMerger
             }
             catch (Exception ex)
             {
-                throw new Exception($"Exception occurred while exporting workbook.\nException originated from file:\n{fileName}.\n\nException: {ex}");
+                throw new Exception(
+                    $"Exception occurred while exporting workbook.\nException originated from file:\n{fileName}.\n\nException: {ex}");
             }
         }
 

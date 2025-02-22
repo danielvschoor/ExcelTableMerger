@@ -1,18 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace ExcelWorkbookMerger.Models
+﻿namespace ExcelWorkbookMerger.Models
 {
-    public class TableExport
+    public record TableExport
     {
         public override int GetHashCode() => NewTableName.GetHashCode();
         
-        public string FileName { get; set; }
-        public string NewTableName { get; set; }
-        public string OriginalTableName { get; set; }
+        public required string FileName { get; init; }
+        public required string NewTableName { get; init; }
+        public required string OriginalTableName { get; init; }
 
         public void Deconstruct(out string fileName, out string newTableName, out string originalTableName)
         {
