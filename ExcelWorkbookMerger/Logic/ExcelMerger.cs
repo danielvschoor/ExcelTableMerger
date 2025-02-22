@@ -3,11 +3,14 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using Windows.Foundation.Diagnostics;
 using ExcelWorkbookMerger.ExtensionMethods;
 using ExcelWorkbookMerger.Models;
 using OfficeOpenXml;
@@ -21,6 +24,48 @@ public static partial class ExcelMerger
     private const string FileName = @"MergedExcel.xlsx";
     private static readonly ConcurrentDictionary<TableExport, ConcurrentQueue<DataTable>> DataTables = new();
     private static readonly ConcurrentQueue<Exception> Exceptions = new();
+
+    private static readonly Lock Lock = new();
+    
+    private static readonly DataTable DebugSheetDataTable = new()
+    {
+        TableName = "DebugSheets",
+        Columns = {"File", "SheetsParsed", "SheetsNotParsed", "SheetsUsedForMerge"},
+    };
+
+    private static readonly DataTable DebugLogDataTable = new()
+    {
+        TableName = "DebugLogs",
+        Columns = {"File", "Sheet", "LogLevel", "LogMessage"},
+    };
+
+    private static void AddLogMessage(LoggingLevel loggingLevel, string message, string? file = null,
+        string? sheet = null)
+    {
+        if (!(MergeSettings?.EnableDebugSheet ?? false))
+        {
+            return;
+        }
+        lock (Lock)
+        {
+            DebugLogDataTable.Rows.Add(file, sheet, loggingLevel.ToString(), message);
+        }
+    }
+
+    private static void AddDebugSheetInfo(string file, string sheetsParsed, string sheetsNotParsed,
+        string sheetsUsedForMerge)
+    {
+        if (!(MergeSettings?.EnableDebugSheet ?? false))
+        {
+            return;
+        }
+        lock (Lock)
+        {
+            DebugSheetDataTable.Rows.Add(file, sheetsParsed, sheetsNotParsed, sheetsUsedForMerge);
+        }
+    }
+
+    private static MergeSettings? MergeSettings { get; set; }
     private static ExcelPackage? _mergedWorkbook;
 
     private static void ClearFields()
@@ -28,13 +73,18 @@ public static partial class ExcelMerger
         DataTables.Clear();
         Exceptions.Clear();
         _mergedWorkbook = null;
+        DebugLogDataTable.Clear();
+        DebugSheetDataTable.Clear();
     }
 
     public static void MergeSheets(string path, IEnumerable<string> files, BackgroundWorker worker,
-        DoWorkEventArgs workArgs)
+        DoWorkEventArgs workArgs, MergeSettings mergeSettings)
     {
         ClearFields();
+        MergeSettings = mergeSettings;
+
         var newFile = CheckResultsFile(path);
+
         if (newFile == null)
             return;
 
@@ -42,12 +92,14 @@ public static partial class ExcelMerger
 
         _mergedWorkbook = new ExcelPackage(newFile);
 
-
         ProcessDataTables(files, worker, workArgs);
 
         CheckExceptions();
 
-        if (ExportToWorkBook(worker, workArgs)) _mergedWorkbook.SaveAs(newFile);
+        if (ExportToWorkBook(worker, workArgs))
+        {
+            _mergedWorkbook.SaveAs(newFile);
+        }
     }
 
     private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs)
@@ -83,6 +135,28 @@ public static partial class ExcelMerger
             }
         }
 
+        if (!(MergeSettings?.EnableDebugSheet ?? false))
+        {
+            return !ShouldCancel(worker, workArgs);
+        }
+        
+        var debugWorksheet =
+            _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugLogs") ??
+            _mergedWorkbook?.Workbook.Worksheets.Add("DebugLogs");
+            
+        if (debugWorksheet == null)
+        {
+            return !ShouldCancel(worker, workArgs);
+        }
+        debugWorksheet.Cells["A1"].LoadFromDataTable(DebugLogDataTable, true);
+        debugWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugSheets") ??
+                         _mergedWorkbook?.Workbook.Worksheets.Add("DebugSheets");
+        if (debugWorksheet == null)
+        {
+            return !ShouldCancel(worker, workArgs);
+        }
+        debugWorksheet.Cells["A1"].LoadFromDataTable(DebugSheetDataTable, true);
+
         return !ShouldCancel(worker, workArgs);
     }
 
@@ -99,15 +173,69 @@ public static partial class ExcelMerger
                 }
 
                 var excelPackage = new ExcelPackage(new FileInfo(file));
-                foreach (var sheet in excelPackage.Workbook.Worksheets)
+
+                var sheetsParsed = new List<string>();
+                var sheetsNotParsed = new List<string>();
+                var sheetsUsedForMerge = new List<string>();
+                IEnumerable<ExcelWorksheet> sheetsToProcess;
+
+                if (MergeSettings!.OnlyMergeLatestSheet)
                 {
+                    ExcelWorksheet? latestSheet = null;
+                    DateTime? latestDate = null;
+
+                    foreach (var sheet in excelPackage.Workbook.Worksheets)
+                    {
+                        if (!DateTime.TryParseExact(sheet.Name, "MMMyy", CultureInfo.InvariantCulture,
+                                DateTimeStyles.None, out var date) && !DateTime.TryParseExact(sheet.Name, "ddMMMyy",
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.None, out date))
+                        {
+                            sheetsNotParsed.Add(sheet.Name);
+                            AddLogMessage(LoggingLevel.Warning, "Could not parse sheet name", file, sheet.Name);
+                            continue;
+                        }
+
+                        sheetsParsed.Add(sheet.Name);
+
+                        if (latestDate != null && !(date.Date > latestDate))
+                        {
+                            continue;
+                        }
+
+                        latestDate = date.Date;
+                        latestSheet = sheet;
+                    }
+
+                    if (latestSheet == null)
+                    {
+                        throw new Exception(
+                            $"Unable to find latest sheet for {file}. Sheets should be named as MMMyy (FEB24)");
+                    }
+
+                    AddLogMessage(LoggingLevel.Information, "Found latest sheet", file, latestSheet.Name);
+
+                    sheetsToProcess = [excelPackage.Workbook.Worksheets.First(x => x.Name == latestSheet.Name)];
+                }
+                else
+                {
+                    sheetsToProcess = excelPackage.Workbook.Worksheets;
+                }
+
+
+                foreach (var sheet in sheetsToProcess)
+                {
+                    sheetsUsedForMerge.Add(sheet.Name);
                     foreach (var table in sheet.Tables)
                     {
                         try
                         {
                             var newTableName = table.Name.Split('_')[0];
                             newTableName = DigitRegex().Replace(newTableName, string.Empty);
-                            newTableName = newTableName + '_' + sheet.Name;
+                            if (!MergeSettings.OnlyMergeLatestSheet)
+                            {
+                                newTableName = newTableName + '_' + sheet.Name;
+                            }
 
                             var tempDt = new DataTable();
                             tempDt.Columns.AddRange(table.Columns.Select(x => new DataColumn(x.Name)).ToArray());
@@ -136,6 +264,9 @@ public static partial class ExcelMerger
                     }
                 }
 
+                AddDebugSheetInfo(file, string.Join(',', sheetsParsed), string.Join(',', sheetsNotParsed),
+                    string.Join(',', sheetsUsedForMerge));
+
                 worker.ReportProgress(StepSize);
             }
             catch (Exception exception)
@@ -146,9 +277,14 @@ public static partial class ExcelMerger
         });
     }
 
+    public static string GetMergedFilePath(string path)
+    {
+        return Path.Combine(path, FileName);
+    }
+    
     private static FileInfo? CheckResultsFile(string path)
     {
-        var mergedFilePath = Path.Combine(path, FileName);
+        var mergedFilePath = GetMergedFilePath(path);
         var newFile = new FileInfo(mergedFilePath);
 
         if (!newFile.Exists)

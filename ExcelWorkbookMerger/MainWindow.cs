@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using ExcelWorkbookMerger.Logic;
+using ExcelWorkbookMerger.Models;
 
 namespace ExcelWorkbookMerger;
 
@@ -37,6 +38,7 @@ public partial class MainWindow : Form
         if (dialog.ShowDialog() != DialogResult.OK)
             return;
         var basePath = string.Empty;
+
         foreach (var file in dialog.FileNames)
         {
             var fi = new FileInfo(file);
@@ -45,7 +47,6 @@ public partial class MainWindow : Form
         }
 
         if (basePath != string.Empty) directoryTextBox.Text = basePath;
-        
     }
 
     private void button1_Click_1(object sender, EventArgs e)
@@ -74,10 +75,9 @@ public partial class MainWindow : Form
         }
 
         timer1.Start();
-        
+
         // Start the asynchronous operation.
         backgroundWorker1.RunWorkerAsync();
-        
     }
 
     private void button1_Click_2(object sender, EventArgs e)
@@ -95,8 +95,16 @@ public partial class MainWindow : Form
     private void backgroundWorker1_DoWork(object sender, DoWorkEventArgs e)
     {
         _stopwatch.Restart();
-        if (sender is BackgroundWorker worker) 
-            ExcelMerger.MergeSheets(directoryTextBox.Text, fileListBox.Items.Cast<string>(), worker, e);
+        if (sender is BackgroundWorker worker)
+        {
+            var mergeSettings = new MergeSettings()
+            {
+                OnlyMergeLatestSheet = onlyMergeLatestSheetCheckBox.Checked,
+                EnableDebugSheet = enableDebugSheet.Checked
+            };
+            ExcelMerger.MergeSheets(directoryTextBox.Text, fileListBox.Items.Cast<string>(), worker, e, mergeSettings);
+        }
+
         _stopwatch.Stop();
     }
 
@@ -128,14 +136,27 @@ public partial class MainWindow : Form
         {
             // Finally, handle the case where the operation 
             // succeeded.
-            MessageBox.Show($@"Completed in {_stopwatch.Elapsed.TotalSeconds} seconds.", "Completed",
-                MessageBoxButtons.OK);
-            Process.Start(new ProcessStartInfo
+            var answer = MessageBox.Show($@"Completed in {_stopwatch.Elapsed.TotalSeconds} seconds. Open merged file?",
+                "Completed",
+                MessageBoxButtons.YesNo);
+
+            if (answer == DialogResult.Yes)
             {
-                FileName = directoryTextBox.Text,
-                UseShellExecute = true,
-                Verb = "open"
-            });
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = ExcelMerger.GetMergedFilePath(directoryTextBox.Text),
+                    UseShellExecute = true,
+                });
+            }
+            else
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = directoryTextBox.Text,
+                    UseShellExecute = true,
+                    Verb = "open"
+                });
+            }
         }
 
 
@@ -164,4 +185,8 @@ public partial class MainWindow : Form
             backgroundWorker1.CancelAsync();
     }
 
+    private void clearFileListButton_Click(object sender, EventArgs e)
+    {
+        fileListBox.Items.Clear();
+    }
 }

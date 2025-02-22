@@ -8,7 +8,7 @@
         <Nullable>enable</Nullable>
 		<SignAssembly>false</SignAssembly>
 		<Version>1.1.0</Version>
-		<TargetFramework>net9.0-windows</TargetFramework>
+		<TargetFramework>net9.0-windows10.0.26100.0</TargetFramework>
         <!-- <OutputType>WinExe</OutputType>
         
         <AssemblyOriginatorKeyFile>Daniel van Schoor.snk</AssemblyOriginatorKeyFile>
