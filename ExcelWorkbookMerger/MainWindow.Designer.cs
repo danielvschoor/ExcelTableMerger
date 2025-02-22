@@ -162,7 +162,7 @@ namespace ExcelWorkbookMerger
             label4.Name = "label4";
             label4.Size = new System.Drawing.Size(147, 18);
             label4.TabIndex = 10;
-            label4.Text = "van Schoor-Els Technology\r\n";
+            label4.Text = $"{Application.CompanyName}\r\n";
             // 
             // backgroundWorker1
             // 
@@ -200,14 +200,15 @@ namespace ExcelWorkbookMerger
             // 
             // label6
             // 
-            label6.Anchor = ((System.Windows.Forms.AnchorStyles) (System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right));
+            label6.Anchor = ((System.Windows.Forms.AnchorStyles) (System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left));
             label6.Font = new System.Drawing.Font("Segoe UI", 7F);
             label6.Location = new System.Drawing.Point(1, 626);
             label6.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
             label6.Name = "label6";
             label6.Size = new System.Drawing.Size(147, 18);
             label6.TabIndex = 13;
-            label6.Text = "Version " + Application.ProductVersion;
+            label6.Text = $"Version: {Application.ProductVersion}";
+
             // 
             // MainWindow
             // 
