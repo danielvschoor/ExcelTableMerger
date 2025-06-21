@@ -23,29 +23,34 @@ public static partial class ExcelMerger
     private const string FileName = @"MergedExcel.xlsx";
     private static readonly ConcurrentDictionary<TableExport, ConcurrentQueue<DataTable>> DataTables = new();
     private static readonly ConcurrentQueue<Exception> Exceptions = new();
-
-    private static readonly Lock Lock = new();
     
+    private static bool IsDebugEnabled => MergeSettings?.EnableDebugSheet == true;
+    private static readonly Lock DebugLock = new();
+    private static readonly Lock LogLock = new();
+    private static readonly Lock ProgressLock = new();
+
+
     private static readonly DataTable DebugSheetDataTable = new()
     {
         TableName = "DebugSheets",
-        Columns = {"File", "SheetsParsed", "SheetsNotParsed", "SheetsUsedForMerge"},
+        Columns = { "File", "SheetsParsed", "SheetsNotParsed", "SheetsUsedForMerge" },
     };
 
     private static readonly DataTable DebugLogDataTable = new()
     {
         TableName = "DebugLogs",
-        Columns = {"File", "Sheet", "LogLevel", "LogMessage"},
+        Columns = { "File", "Sheet", "LogLevel", "LogMessage" },
     };
 
     private static void AddLogMessage(LogLevel loggingLevel, string message, string? file = null,
         string? sheet = null)
     {
-        if (!(MergeSettings?.EnableDebugSheet ?? false))
+        if (!IsDebugEnabled)
         {
             return;
         }
-        lock (Lock)
+
+        using (LogLock.EnterScope())
         {
             DebugLogDataTable.Rows.Add(file, sheet, loggingLevel.ToString(), message);
         }
@@ -54,25 +59,23 @@ public static partial class ExcelMerger
     private static void AddDebugSheetInfo(string file, string sheetsParsed, string sheetsNotParsed,
         string sheetsUsedForMerge)
     {
-        if (!(MergeSettings?.EnableDebugSheet ?? false))
+        if (!IsDebugEnabled)
         {
             return;
         }
 
-        lock (Lock)
+        using (DebugLock.EnterScope())
         {
             DebugSheetDataTable.Rows.Add(file, sheetsParsed, sheetsNotParsed, sheetsUsedForMerge);
         }
     }
 
     private static MergeSettings? MergeSettings { get; set; }
-    private static ExcelPackage? _mergedWorkbook;
 
     private static void ClearFields()
     {
         DataTables.Clear();
         Exceptions.Clear();
-        _mergedWorkbook = null;
         DebugLogDataTable.Clear();
         DebugSheetDataTable.Clear();
     }
@@ -90,41 +93,42 @@ public static partial class ExcelMerger
 
         if (ShouldCancel(worker, workArgs)) return;
 
-        _mergedWorkbook = new ExcelPackage(newFile);
-
         ProcessDataTables(files, worker, workArgs);
 
         CheckExceptions();
 
-        if (ExportToWorkBook(worker, workArgs))
+        using var mergedWorkbook = new ExcelPackage(newFile);
+        if (ExportToWorkBook(worker, workArgs, mergedWorkbook))
         {
-            _mergedWorkbook.SaveAs(newFile);
+            mergedWorkbook.SaveAs(newFile);
         }
     }
 
-    private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs)
+    private static bool ExportToWorkBook(BackgroundWorker worker, DoWorkEventArgs workArgs, ExcelPackage mergedWorkbook)
     {
-        foreach (var ((fileName, newTableName, _), dataTables) in DataTables)
+        foreach (var ((fileName, newTableName, _), innerTables) in DataTables
+                     .OrderBy(x => x.Key.NewTableName))
         {
             try
             {
                 if (ShouldCancel(worker, workArgs)) return false;
 
                 var finalDt = new DataTable();
-                foreach (var tempDt in dataTables)
+                foreach (var tempDt in innerTables)
                 {
                     if (ShouldCancel(worker, workArgs)) return false;
 
                     finalDt.Merge(tempDt);
                 }
 
+                var safeTableName = newTableName.Truncate(31);
                 var finalWorksheet =
-                    _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == newTableName.Truncate(31)) ??
-                    _mergedWorkbook?.Workbook.Worksheets.Add(newTableName);
+                    mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == safeTableName) ??
+                    mergedWorkbook?.Workbook.Worksheets.Add(safeTableName);
                 if (finalWorksheet == null) return false;
-                if (finalWorksheet.Tables.All(x => x.Name != newTableName))
+                if (finalWorksheet.Tables.All(x => x.Name != safeTableName))
                     finalWorksheet.Tables.Add(new ExcelAddressBase(1, 1, finalDt.Rows.Count + 1,
-                        finalDt.Columns.Count), newTableName);
+                        finalDt.Columns.Count), safeTableName);
 
                 finalWorksheet.Cells["A1"].LoadFromDataTable(finalDt, true);
             }
@@ -135,14 +139,14 @@ public static partial class ExcelMerger
             }
         }
 
-        if (!(MergeSettings?.EnableDebugSheet ?? false))
+        if (!IsDebugEnabled)
         {
             return !ShouldCancel(worker, workArgs);
         }
 
         var debugWorksheet =
-            _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugLogs") ??
-            _mergedWorkbook?.Workbook.Worksheets.Add("DebugLogs");
+            mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugLogs") ??
+            mergedWorkbook?.Workbook.Worksheets.Add("DebugLogs");
 
         if (debugWorksheet == null)
         {
@@ -150,8 +154,8 @@ public static partial class ExcelMerger
         }
 
         debugWorksheet.Cells["A1"].LoadFromDataTable(DebugLogDataTable, true);
-        debugWorksheet = _mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugSheets") ??
-                         _mergedWorkbook?.Workbook.Worksheets.Add("DebugSheets");
+        debugWorksheet = mergedWorkbook?.Workbook.Worksheets.FirstOrDefault(x => x.Name == "DebugSheets") ??
+                         mergedWorkbook?.Workbook.Worksheets.Add("DebugSheets");
         if (debugWorksheet == null)
         {
             return !ShouldCancel(worker, workArgs);
@@ -173,14 +177,12 @@ public static partial class ExcelMerger
                     state.Stop();
                     return;
                 }
-
-                var excelPackage = new ExcelPackage(new FileInfo(file));
-
                 var sheetsParsed = new List<string>();
                 var sheetsNotParsed = new List<string>();
                 var sheetsUsedForMerge = new List<string>();
                 IEnumerable<ExcelWorksheet> sheetsToProcess;
 
+                using var excelPackage = new ExcelPackage(new FileInfo(file));
                 if (MergeSettings!.OnlyMergeLatestSheet)
                 {
                     ExcelWorksheet? latestSheet = null;
@@ -217,7 +219,7 @@ public static partial class ExcelMerger
 
                     AddLogMessage(LogLevel.Info, "Found latest sheet", file, latestSheet.Name);
 
-                    sheetsToProcess = [excelPackage.Workbook.Worksheets.First(x => x.Name == latestSheet.Name)];
+                    sheetsToProcess = [latestSheet];
                 }
                 else
                 {
@@ -242,6 +244,7 @@ public static partial class ExcelMerger
                             var tempDt = new DataTable();
                             tempDt.Columns.AddRange(table.Columns.Select(x => new DataColumn(x.Name)).ToArray());
                             var tableRange = table.Range;
+                            var tableName = table.Name;
                             sheet.Cells[tableRange.Start.Row, tableRange.Start.Column, tableRange.End.Row,
                                 tableRange.End.Column].ToDataTable(x =>
                             {
@@ -253,7 +256,7 @@ public static partial class ExcelMerger
                                 {
                                     FileName = file,
                                     NewTableName = newTableName,
-                                    OriginalTableName = table.Name
+                                    OriginalTableName = tableName
                                 }
                                 , _ => new ConcurrentQueue<DataTable>());
                             dtList.Enqueue(tempDt);
@@ -261,15 +264,14 @@ public static partial class ExcelMerger
                         catch (Exception ex)
                         {
                             throw new Exception(
-                                $"Exception in File: {file}\nSheet:{sheet}\nTable: {table.Name}:\n{ex}");
+                                $"Exception in File: {file}\nSheet:{sheet}\nTable: {table.Name}:\n{ex}", ex);
                         }
                     }
                 }
 
                 AddDebugSheetInfo(file, string.Join(',', sheetsParsed), string.Join(',', sheetsNotParsed),
                     string.Join(',', sheetsUsedForMerge));
-
-                worker.ReportProgress(StepSize);
+                ReportProgress(worker, StepSize);
             }
             catch (Exception exception)
             {
@@ -312,6 +314,14 @@ public static partial class ExcelMerger
             return false;
         workArgs.Cancel = true;
         return true;
+    }
+
+    private static void ReportProgress(BackgroundWorker worker, int progress)
+    {
+        using (ProgressLock.EnterScope())
+        {
+            worker.ReportProgress(progress);
+        }
     }
 
     [GeneratedRegex("[\\d-]")]
