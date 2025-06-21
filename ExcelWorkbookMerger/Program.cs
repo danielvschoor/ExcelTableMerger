@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Runtime.Versioning;
 using System.Windows.Forms;
 using OfficeOpenXml;
 
@@ -10,6 +11,7 @@ internal static class Program
     ///     The main entry point for the application.
     /// </summary>
     [STAThread]
+    [SupportedOSPlatform("windows")]
     private static void Main()
     {
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
