@@ -14,7 +14,7 @@ internal static class Program
     [SupportedOSPlatform("windows")]
     private static void Main()
     {
-        ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+        ExcelPackage.License.SetNonCommercialOrganization("van Schoor-Els Technology");
         Application.EnableVisualStyles();
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.SetCompatibleTextRenderingDefault(false);
