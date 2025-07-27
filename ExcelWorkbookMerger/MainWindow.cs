@@ -121,7 +121,8 @@ public partial class MainWindow : Form
         // First, handle the case where an exception was thrown.
         if (e.Error != null)
         {
-            MessageBox.Show(e.Error.Message, @"Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            using var dlg = new ErrorDialog(e.Error.Message);
+            dlg.ShowDialog();
         }
         else if (e.Cancelled)
         {
